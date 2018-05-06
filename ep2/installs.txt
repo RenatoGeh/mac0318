@@ -1,0 +1,10 @@
+python-ipdb
+python-pandas
+opencv
+python-pillow
+python-scikit-learn
+python-seaborn
+tensorboard
+python-termcolor
+jupyterlab (AUR)
+pandas_ml (pip)
