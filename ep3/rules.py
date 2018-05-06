@@ -1,5 +1,6 @@
 import numpy as np
 import sklearn.metrics as metrics
+import sklearn.cluster as cluster
 
 from matplotlib import pyplot as plt
 
@@ -132,12 +133,13 @@ class RulesBased(Classifier):
   #            sx, sy - minimum size of rectangular regions in each axis ((w, h) must be divisible by (sx, sy))
   #            q      - number of mean quantiles
   #            ctype  - classification type (by score - 0 - or accumulated error - 1)
-  def __init__(self, w, h, sx, sy, ctype=1):
+  def __init__(self, w, h, sx, sy, q, ctype=1):
     self.w = w
     self.h = h
     self.sx, self.sy = sx, sy
     self.mu = [[], [], []]
     self.ctype = ctype
+    self.q = q
 
   def train(self, D):
     print("Training...")
@@ -147,9 +149,34 @@ class RulesBased(Classifier):
       self.train_instance(d[i], l[i])
     # Compute means of means.
     print("Computing means of means...")
-    for i in range(3):
-      Mu = np.asarray(self.mu[i])
-      self.mu[i] = np.mean(Mu, axis=0)
+    if self.q <= 1:
+      for i in range(3):
+        Mu = np.asarray(self.mu[i])
+        self.mu[i] = np.mean(Mu, axis=0)
+    else:
+      self.n = len(self.mu)
+      f_mu, n_mu = [None]*3, [None]*3
+      for z in range(3):
+        print("  ... for label " + LABELS_STR[z] + "...")
+        Mu = np.array(self.mu[z])
+        print(Mu.shape)
+        m = Mu.shape[1]
+        f_mu[z], n_mu[z] = [[None]*m]*self.q, [[None]*m]*self.q
+        for i in range(m):
+          print("    ... and column " + str(i) + "...")
+          c = Mu[:,i]
+          k = []
+          for v in c:
+            k.append([v])
+          _, cl, _ = cluster.k_means(k, n_clusters=self.q, init='k-means++', n_jobs=-1)
+          C = [[]]*self.q
+          for j, v in enumerate(cl):
+            C[v].append(c[j])
+          for j, v in enumerate(C):
+            f_mu[z][j][i] = np.mean(v)
+            n_mu[z][j][i] = len(v)
+      self.mu = f_mu
+      self.n_mu = n_mu
 
   def collect_means(self, I):
     M = np.reshape(I, (self.w, self.h))
@@ -204,28 +231,39 @@ class RulesBased(Classifier):
   def classify(self, I):
     u = np.asarray(self.collect_means(I))
     # Compute scores and find most probable label.
-    if self.ctype == 0:
-      V = [None] * 3
-      for i in range(3):
-        V[i] = np.abs(u-np.asarray(self.mu[i]))
-      s = [0, 0, 0]
-      for j in range(len(u)):
+    if self.q <= 1:
+      if self.ctype == 0:
+        V = [None] * 3
+        for i in range(3):
+          V[i] = np.abs(u-np.asarray(self.mu[i]))
+        s = [0, 0, 0]
+        for j in range(len(u)):
+          m_i, m = -1, -1
+          for i in range(3):
+            d = V[i][j]
+            if m_i < 0 or d < m:
+              m_i, m = i, d
+          s[m_i] += 1
         m_i, m = -1, -1
         for i in range(3):
-          d = V[i][j]
+          d = s[i]
+          if m_i < 0 or d > m:
+            m_i, m = i, d
+        return m_i
+      else:
+        m_i, m = -1, -1
+        for i in range(3):
+          d = np.sum(np.abs(u-np.asarray(self.mu[i])))
           if m_i < 0 or d < m:
             m_i, m = i, d
-        s[m_i] += 1
-      m_i, m = -1, -1
-      for i in range(3):
-        d = s[i]
-        if m_i < 0 or d > m:
-          m_i, m = i, d
-      return m_i
+        return m_i
     else:
       m_i, m = -1, -1
       for i in range(3):
-        d = np.sum(np.abs(u-np.asarray(self.mu[i])))
+        d = 0
+        for j in range(self.q):
+          d += np.abs(u-np.asarray(self.mu[i][j])).T.dot(np.asarray(self.n_mu[i][j]))
+        d /= self.n
         if m_i < 0 or d < m:
           m_i, m = i, d
       return m_i
@@ -235,9 +273,9 @@ def run():
   D, L, D_SIZE, N, M = init_data()
   # Convert raw data to Dataset, partitioning test and train datasets and taking a uniform number
   # of images of each label.
-  R, T = partition(D, L, 0.2, M)
+  R, T = partition(D, L, 0.20, M)
   print(R.Size(), T.Size())
-  rules = RulesBased(120, 160, 2, 2)
+  rules = RulesBased(120, 160, 16, 16, 4)
   rules.train(R)
   s, P = rules.test(T)
   print("Classifier score: " + str(s*100) + "% sucess.")
