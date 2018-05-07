@@ -156,6 +156,7 @@ class RulesBased(Classifier):
     else:
       self.n = len(self.mu)
       f_mu, n_mu = [None]*3, [None]*3
+      t_i = 0
       for z in range(3):
         print("  ... for label " + LABELS_STR[z] + "...")
         Mu = np.array(self.mu[z])
@@ -163,7 +164,9 @@ class RulesBased(Classifier):
         m = Mu.shape[1]
         f_mu[z], n_mu[z] = [[None]*m]*self.q, [[None]*m]*self.q
         for i in range(m):
-          print("    ... and column " + str(i) + "...")
+          if t_i % int(m/10) == 0:
+            print("    ... and column " + str(i) + "... [" + str(100*t_i/m) + "% done]")
+          t_i += 1
           c = Mu[:,i]
           k = []
           for v in c:
@@ -275,7 +278,7 @@ def run():
   # of images of each label.
   R, T = partition(D, L, 0.20, M)
   print(R.Size(), T.Size())
-  rules = RulesBased(120, 160, 16, 16, 4)
+  rules = RulesBased(120, 160, 2, 2, 3)
   rules.train(R)
   s, P = rules.test(T)
   print("Classifier score: " + str(s*100) + "% sucess.")
