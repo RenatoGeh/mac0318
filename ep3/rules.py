@@ -352,7 +352,7 @@ def test_classifier():
 def init_classifier():
   D, L, D_SIZE, N, M = init_data()
   R = partition(D, L, 1, M)
-  rules = RulesBased(120, 160, 2, 2, 1)
+  rules = RulesBased(120, 160, 2, 2, 5)
   rules.train(R)
   return rules
 
@@ -409,7 +409,7 @@ def run():
   K = init_camera()
   while True:
     time.sleep(0.05)
-    I = capture_image(K)
+    I = capture_image(K).flatten()
     c = R.classify(I)
     send(B, c)
 
