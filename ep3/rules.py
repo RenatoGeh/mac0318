@@ -1,14 +1,24 @@
 import numpy as np
 import sklearn.metrics as metrics
 import sklearn.cluster as cluster
-
-from matplotlib import pyplot as plt
+import pickle
+import sys
+import image_manipulation
+import time
+import USBInterface
+import cv2
+import usb
+from Camera import Camera
 
 # Labels.
 UP, LT, RT = 0, 1, 2
-LABELS_STR = ["UP", "LEFT", "RIGHT"]
+LABELS_STR = ["UP", "RIGHT", "LEFT"]
 
-DEBUG = False
+# Image dimensions.
+W = 160
+H = 120
+
+DEBUG = True
 
 class Dataset:
   # Data
@@ -69,26 +79,38 @@ def partition(D, L, p, M):
 
   m = int(P/3)
   n = int(M/3)
-  r, s = [], []
-  for i in range(3):
-    r.extend(nD[i][0:m])
-  np.random.shuffle(r)
-  for i in range(3):
-    s.extend(nD[i][m:n])
-  np.random.shuffle(s)
+  if p == 1:
+    r = []
+    for i in range(3):
+      r.extend(nD[i][0:n])
+    np.random.shuffle(r)
+    rl, rd = [], []
+    for i in r:
+      rd.append(D[i])
+      rl.append(L[i])
+    R = Dataset(rd, rl)
+    return R
+  else:
+    r, s = [], []
+    for i in range(3):
+      r.extend(nD[i][0:m])
+    np.random.shuffle(r)
+    for i in range(3):
+      s.extend(nD[i][m:n])
+    np.random.shuffle(s)
 
-  rl, sl = [], []
-  rd, sd = [], []
-  for i in r:
-    rd.append(D[i])
-    rl.append(L[i])
-  for i in s:
-    sd.append(D[i])
-    sl.append(L[i])
-  R = Dataset(rd, rl)
-  T = Dataset(sd, sl)
+    rl, sl = [], []
+    rd, sd = [], []
+    for i in r:
+      rd.append(D[i])
+      rl.append(L[i])
+    for i in s:
+      sd.append(D[i])
+      sl.append(L[i])
+    R = Dataset(rd, rl)
+    T = Dataset(sd, sl)
 
-  return R, T
+    return R, T
 
 # Base classifier class.
 class Classifier:
@@ -108,9 +130,6 @@ class Classifier:
       print("Classified as " + LABELS_STR[c] + ", should be " + LABELS_STR[l[i]] + ".")
       if l[i] == c:
         s += 1
-      elif DEBUG:
-        plt.imshow(np.asarray(d[i]).reshape(120, 160), cmap='gray')
-        plt.show()
       P.append(c)
     return s/n, P
 
@@ -133,13 +152,55 @@ class RulesBased(Classifier):
   #            sx, sy - minimum size of rectangular regions in each axis ((w, h) must be divisible by (sx, sy))
   #            q      - number of mean quantiles
   #            ctype  - classification type (by score - 0 - or accumulated error - 1)
-  def __init__(self, w, h, sx, sy, q, ctype=1):
+  def __init__(self, w, h, sx, sy, q, ctype=1, W=None):
     self.w = w
     self.h = h
     self.sx, self.sy = sx, sy
     self.mu = [[], [], []]
     self.ctype = ctype
     self.q = q
+    if not W:
+      self.tW = [0.7, 0.3, 0.6, 0.8, 0.4]
+    else:
+      self.tW = W
+    self.init_weights()
+    self.W = np.diag(self.W)
+
+  def add_weight(self, i):
+    self.W.append(self.tW[i])
+
+  def init_weights(self):
+    self.W = []
+    # Get all triangular matrices means on each diagonal.
+    for i in range(self.h-1):
+      # Triangular matrix above the i-th diagonal.
+      self.add_weight(0)
+      # Mirrored triangular matrix.
+      self.add_weight(0)
+      # Triangular matrix below the i-th diagonal.
+      self.add_weight(0)
+      # Mirrored triangular matrix.
+      self.add_weight(0)
+    # Get rectangular regions.
+    rx, ry = int(self.w/self.sx), int(self.h/self.sy)
+    for i in range(rx):
+      for j in range(ry):
+        self.add_weight(1)
+    # Get main rectangular partitions.
+    for i in range(6):
+      self.add_weight(2)
+    # Get top and bottom parts.
+    for i in range(3, 10):
+      self.add_weight(3)
+      self.add_weight(3)
+      self.add_weight(3)
+      self.add_weight(3)
+      self.add_weight(3)
+      self.add_weight(3)
+      self.add_weight(3)
+    # Get 'reflections'.
+    self.add_weight(4)
+    self.add_weight(4)
 
   def train(self, D):
     print("Training...")
@@ -156,8 +217,8 @@ class RulesBased(Classifier):
     else:
       self.n = len(self.mu)
       f_mu, n_mu = [None]*3, [None]*3
-      t_i = 0
       for z in range(3):
+        t_i = 0
         print("  ... for label " + LABELS_STR[z] + "...")
         Mu = np.array(self.mu[z])
         print(Mu.shape)
@@ -224,6 +285,9 @@ class RulesBased(Classifier):
       u.append(np.mean(M[0:x2, 0:self.h]))
       u.append(np.mean(M[x2:x1, 0:self.h]))
       u.append(np.mean(M[x2:x1, y2:y1]))
+    # Get 'reflections'.
+    u.append(np.mean(M[0:int(self.w/2), 0:self.h]-M[int(self.w/2):self.w, 0:self.h]))
+    u.append(np.mean(M[0:self.w, 0:int(self.h/2)]-M[0:self.w, int(self.h/2):self.h]))
     return u
 
   def train_instance(self, I, l):
@@ -256,7 +320,7 @@ class RulesBased(Classifier):
       else:
         m_i, m = -1, -1
         for i in range(3):
-          d = np.sum(np.abs(u-np.asarray(self.mu[i])))
+          d = np.sum(np.abs((u-np.asarray(self.mu[i])).dot(self.W)))
           if m_i < 0 or d < m:
             m_i, m = i, d
         return m_i
@@ -265,25 +329,101 @@ class RulesBased(Classifier):
       for i in range(3):
         d = 0
         for j in range(self.q):
-          d += np.abs(u-np.asarray(self.mu[i][j])).T.dot(np.asarray(self.n_mu[i][j]))
+          d += np.abs((u-np.asarray(self.mu[i][j])).dot(self.W)).T.dot(np.asarray(self.n_mu[i][j]))
         d /= self.n
         if m_i < 0 or d < m:
           m_i, m = i, d
       return m_i
 
-def run():
+def test_classifier():
   # Get raw dataset data and labels.
   D, L, D_SIZE, N, M = init_data()
   # Convert raw data to Dataset, partitioning test and train datasets and taking a uniform number
   # of images of each label.
   R, T = partition(D, L, 0.20, M)
   print(R.Size(), T.Size())
-  rules = RulesBased(120, 160, 2, 2, 3)
+  rules = RulesBased(H, W, 2, 2, 1)
   rules.train(R)
   s, P = rules.test(T)
   print("Classifier score: " + str(s*100) + "% sucess.")
   print("Confusion matrix:")
   print(metrics.confusion_matrix(T.Labels(), P))
 
+def init_classifier():
+  D, L, D_SIZE, N, M = init_data()
+  R = partition(D, L, 1, M)
+  rules = RulesBased(120, 160, 2, 2, 1)
+  rules.train(R)
+  return rules
+
+def init_camera():
+  K = Camera(W, H, 0)
+  return K
+
+def init_bot():
+  r_exc = False
+  try:
+    B = next(USBInterface.find_bricks(debug=False))
+    B.connect()
+  except usb.core.NoBackendError:
+    r_exc = True
+  assert r_exc == 0, "No NXT found..."
+  return B
+
+def capture_image(K):
+  img = K.take_picture()
+  s_img = cv2.resize(img, (W, H))
+  return image_manipulation.binarize_image(s_img)
+
+LABELS_BYTE = ['\x02', '\x03', '\x04']
+
+def send(B, c):
+  try:
+    print(LABELS_STR[c])
+    B.send(LABELS_BYTE[c])
+  except Exception as e:
+    print(e)
+
+# Saves classifier.
+def save(C, filename):
+  with open(filename, 'wb') as f:
+    pickle.dump(C, f)
+
+# Loads classifier.
+def load(filename):
+  with open(filename, 'rb') as f:
+    return pickle.load(f)
+
+def has_arg(i, s1, s2):
+  return len(sys.argv) > 1 and (sys.argv[i] == s1 or sys.argv[i] == s2)
+
+def run():
+  if has_arg(1, '-l', '--load'):
+    R = load(sys.argv[2])
+  else:
+    R = init_classifier()
+  if has_arg(1, '-s', '--save'):
+    save(R, sys.argv[2])
+    return
+  B = init_bot()
+  K = init_camera()
+  while True:
+    time.sleep(0.05)
+    I = capture_image(K)
+    c = R.classify(I)
+    send(B, c)
+
 if __name__ == "__main__":
-  run()
+  if ('-h' in sys.argv) or ('--help' in sys.argv) or len(sys.argv) <= 1:
+    print("Usage: " + sys.argv[0] + " [-h | --help] [-d | --debug] [-l | --load filename] [-s | --save filename]")
+    print("Rules based classifier.\n")
+    print("  -d, --debug   runs classifier on debug mode (shows accuracy based on in-sample dataset)")
+    print("  -l, --load    loads a pickle with trained means")
+    print("  -s, --save    saves this classifier's means in a pickle file")
+    print("  -h, --help    shows this help message")
+    sys.exit(0)
+  DEBUG = ('-d' in sys.argv) or ('--debug' in sys.argv)
+  if DEBUG:
+    test_classifier()
+  else:
+    run()

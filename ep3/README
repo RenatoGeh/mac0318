@@ -1,0 +1,29 @@
+Assume-se que o dataset esteja nomeado como:
+
+  root/
+    data/
+      data.npy
+      labels.npy
+
+Onde root é o diretório em que rules.py está. O dataset usado está em:
+
+  data.npy:   https://www.dropbox.com/s/hhqii7xcv2yanhl/data.npy?dl=0
+  labels.npy: https://www.dropbox.com/s/pn697z70nxwlluu/labels.npy?dl=0
+
+Para ver as opções de rules.py, rode:
+
+  python3 rules.py --help
+
+Como o "treinamento" do classificador demora muito no Raspberry Pi, é possível treinar o
+classificador no computador, gerar um pickle e depois mandar o pickle para o classificador no
+Raspberry Pi. Então, os passos são:
+
+1. Treinar o classificador e gerar um pickle:
+
+  python3 rules.py -s rules.pkl
+
+2. Mandar o pickle para o Raspberry Pi.
+3. Rodar o classificador de dentro do Raspberry Pi usando o pickle gerado.
+
+  python3 rules.py -l rules.pkl
+

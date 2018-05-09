@@ -8,3 +8,5 @@ tensorboard
 python-termcolor
 jupyterlab (AUR)
 pandas_ml (pip)
+gtkglext
+python-pyusb
