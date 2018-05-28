@@ -152,55 +152,13 @@ class RulesBased(Classifier):
   #            sx, sy - minimum size of rectangular regions in each axis ((w, h) must be divisible by (sx, sy))
   #            q      - number of mean quantiles
   #            ctype  - classification type (by score - 0 - or accumulated error - 1)
-  def __init__(self, w, h, sx, sy, q, ctype=1, W=None):
+  def __init__(self, w, h, sx, sy, q, ctype=1):
     self.w = w
     self.h = h
     self.sx, self.sy = sx, sy
     self.mu = [[], [], []]
     self.ctype = ctype
     self.q = q
-    if not W:
-      self.tW = [0.7, 0.3, 0.6, 0.8, 0.4]
-    else:
-      self.tW = W
-    self.init_weights()
-    self.W = np.diag(self.W)
-
-  def add_weight(self, i):
-    self.W.append(self.tW[i])
-
-  def init_weights(self):
-    self.W = []
-    # Get all triangular matrices means on each diagonal.
-    for i in range(self.h-1):
-      # Triangular matrix above the i-th diagonal.
-      self.add_weight(0)
-      # Mirrored triangular matrix.
-      self.add_weight(0)
-      # Triangular matrix below the i-th diagonal.
-      self.add_weight(0)
-      # Mirrored triangular matrix.
-      self.add_weight(0)
-    # Get rectangular regions.
-    rx, ry = int(self.w/self.sx), int(self.h/self.sy)
-    for i in range(rx):
-      for j in range(ry):
-        self.add_weight(1)
-    # Get main rectangular partitions.
-    for i in range(6):
-      self.add_weight(2)
-    # Get top and bottom parts.
-    for i in range(3, 10):
-      self.add_weight(3)
-      self.add_weight(3)
-      self.add_weight(3)
-      self.add_weight(3)
-      self.add_weight(3)
-      self.add_weight(3)
-      self.add_weight(3)
-    # Get 'reflections'.
-    self.add_weight(4)
-    self.add_weight(4)
 
   def train(self, D):
     print("Training...")
@@ -249,45 +207,48 @@ class RulesBased(Classifier):
     for i in range(self.h-1):
       # Triangular matrix above the i-th diagonal.
       L = np.tril(M, i)
-      u.append(np.mean(L))
+      u.append(np.sum(L))
       # Mirrored triangular matrix.
       mL = M-L
-      u.append(np.mean(mL))
+      u.append(np.sum(mL))
       # Triangular matrix below the i-th diagonal.
       L = np.tril(M, -i)
-      u.append(np.mean(L))
+      u.append(np.sum(L))
       # Mirrored triangular matrix.
       mL = M-L
-      u.append(np.mean(mL))
+      u.append(np.sum(mL))
     # Get rectangular regions.
     rx, ry = int(self.w/self.sx), int(self.h/self.sy)
     for i in range(rx):
       for j in range(ry):
         R = M[i*self.sx:(i+1)*self.sx, j*self.sy:(j+1)*self.sy]
-        u.append(np.mean(R))
+        u.append(np.sum(R))
     # Get main rectangular partitions.
-    u.append(np.mean(M[0:int(self.w/2), 0:int(self.h/2)]))
-    u.append(np.mean(M[0:int(self.w/2), 0:self.h]))
-    u.append(np.mean(M[0:int(self.w/2), int(self.h/2):self.h]))
-    u.append(np.mean(M[int(self.w/2):self.w, 0:int(self.h/2)]))
-    u.append(np.mean(M[int(self.w/2):self.w, 0:self.h]))
-    u.append(np.mean(M[int(self.w/2):self.w, int(self.h/2):self.h]))
+    u.append(np.sum(M[0:int(self.w/2), 0:int(self.h/2)]))
+    u.append(np.sum(M[0:int(self.w/2), 0:self.h]))
+    u.append(np.sum(M[0:int(self.w/2), int(self.h/2):self.h]))
+    u.append(np.sum(M[int(self.w/2):self.w, 0:int(self.h/2)]))
+    u.append(np.sum(M[int(self.w/2):self.w, 0:self.h]))
+    u.append(np.sum(M[int(self.w/2):self.w, int(self.h/2):self.h]))
+    # Quadrants.
+    for i in range(2, 5):
+      u.append(np.sum(M[0:int(self.w/i), 0:int(self.h/i)]))
+      u.append(np.sum(M[0:int(self.w/i), self.h-int(self.h/i):self.h]))
+      u.append(np.sum(M[self.w-int(self.w/i):self.w, self.h-int(self.h/i):self.h]))
+      u.append(np.sum(M[self.w-int(self.w/i):self.w, 0:int(self.h/i)]))
     # Get top and bottom parts.
     for i in range(3, 10):
       y1 = self.h-int(self.h/i)
-      u.append(np.mean(M[0:self.w, y1:self.h]))
       y2 = int(self.h/i)
-      u.append(np.mean(M[0:self.w, 0:y2]))
-      u.append(np.mean(M[0:self.w, y2:y1]))
       x1 = self.w-int(self.w/i)
-      u.append(np.mean(M[x1:self.w, 0:self.h]))
       x2 = int(self.w/i)
-      u.append(np.mean(M[0:x2, 0:self.h]))
-      u.append(np.mean(M[x2:x1, 0:self.h]))
-      u.append(np.mean(M[x2:x1, y2:y1]))
-    # Get 'reflections'.
-    u.append(np.mean(M[0:int(self.w/2), 0:self.h]-M[int(self.w/2):self.w, 0:self.h]))
-    u.append(np.mean(M[0:self.w, 0:int(self.h/2)]-M[0:self.w, int(self.h/2):self.h]))
+      u.append(np.sum(M[0:self.w, y1:self.h]))
+      u.append(np.sum(M[0:self.w, 0:y2]))
+      u.append(np.sum(M[0:self.w, y2:y1]))
+      u.append(np.sum(M[x1:self.w, 0:self.h]))
+      u.append(np.sum(M[0:x2, 0:self.h]))
+      u.append(np.sum(M[x2:x1, 0:self.h]))
+      u.append(np.sum(M[x2:x1, y2:y1]))
     return u
 
   def train_instance(self, I, l):
@@ -320,7 +281,7 @@ class RulesBased(Classifier):
       else:
         m_i, m = -1, -1
         for i in range(3):
-          d = np.sum(np.abs((u-np.asarray(self.mu[i])).dot(self.W)))
+          d = np.sum(np.abs(u-np.asarray(self.mu[i])))
           if m_i < 0 or d < m:
             m_i, m = i, d
         return m_i
@@ -329,7 +290,7 @@ class RulesBased(Classifier):
       for i in range(3):
         d = 0
         for j in range(self.q):
-          d += np.abs((u-np.asarray(self.mu[i][j])).dot(self.W)).T.dot(np.asarray(self.n_mu[i][j]))
+          d += np.abs(u-np.asarray(self.mu[i][j])).T.dot(np.asarray(self.n_mu[i][j]))
         d /= self.n
         if m_i < 0 or d < m:
           m_i, m = i, d
@@ -352,7 +313,7 @@ def test_classifier():
 def init_classifier():
   D, L, D_SIZE, N, M = init_data()
   R = partition(D, L, 1, M)
-  rules = RulesBased(120, 160, 2, 2, 5)
+  rules = RulesBased(120, 160, 2, 2, 1)
   rules.train(R)
   return rules
 
