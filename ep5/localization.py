@@ -94,7 +94,7 @@ class Map:
     Pc = np.multiply(self.Pz[z], self.P)
     self.P = Pc/np.sum(Pc)
 
-  def predict(self, u):
+  def prediction(self, u):
     self.P = np.asarray(np.dot(self.Pxxu[u], self.P)).flatten()
 
   # Arguments:
@@ -133,7 +133,7 @@ class Map:
         self.pos += self.C[u]
       else:
         self.send_move(u)
-      self.predict(u)
+      self.prediction(u)
 
 
 # Arguments:
@@ -142,11 +142,17 @@ class Map:
 #  sigma - Variance.
 #  size - Number of samples for gaussian sampling.
 #  uniform - Whether the distribution should be uniform. False means gaussian.
-def gen_init_pdist(n, mu=100, sigma=40, size=10000, uniform=False):
+def gen_init_pdist(n, mu=100, sigma=40, size=100000, uniform=False):
   if uniform:
     return np.ones(n)/n
   N = stats.norm(mu, math.sqrt(sigma))
   R = N.rvs(size=size)
+  R = R[R>=0]
+  R = R[R<n]
+  R = np.bincount(np.rint(R).astype(int))
+  m = n-len(R)
+  if m > 0:
+    R = np.pad(R, (0, m), mode="constant", constant_values=0)
   return R/np.sum(R)
 
 # Arguments:
@@ -170,6 +176,7 @@ def new_config(b_mu, b_sigma, g_mu, g_sigma, C, starts_with='gap', bin_size=1000
   N_b, N_g = stats.norm(b_mu, math.sqrt(b_sigma)), stats.norm(g_mu, math.sqrt(g_sigma))
   return M, [N_g, N_b], bD
 
+# Read controller commands.
 def read():
   read_map = {'j': 0, 'k': 1, 'l': 2}
   s = ''
@@ -203,6 +210,7 @@ def read():
     else:
       print("Error when parsing command: " + s + c + ". Try again.")
 
+# Draw graph plot.
 def draw_graph(P, M, pos, r):
   m = len(M)
   plt.clf()
@@ -217,6 +225,7 @@ def draw_graph(P, M, pos, r):
     pause_nofocus(0.05)
   return True
 
+# Start.
 def start(M, simulate, p):
   cmds = ['left', 'noop', 'right']
   if simulate:
@@ -225,6 +234,7 @@ def start(M, simulate, p):
   running = False
   print("Ready. Press h for help message.")
   while True:
+    running = draw_graph(M.P, M.M, M.pos, running)
     u, d, e = read()
     if e:
       break
@@ -234,13 +244,18 @@ def start(M, simulate, p):
     M.move(u, d)
     if simulate:
       print("  True position after moving: " + str(M.pos))
-    running = draw_graph(M.P, M.M, M.pos, running)
   if simulate:
     M.stop_simulation()
 
 def run():
   C, N, d = new_config(15, 1, 10, 1, [5, 10, 15, 10, 20, 10, 30, 10, 15, 10, 20, 10, 5], bin_size=100)
-  M = Map(C, N, d, gen_init_pdist(len(C), uniform=True), 3, [-1, 0, 1])
+  # Uniform initial belief.
+  U = gen_init_pdist(len(C), uniform=True)
+  # Gaussian initial belief centered on second box.
+  G1 = gen_init_pdist(len(C), mu=20, sigma=math.sqrt(40))
+  # Gaussian initial belief centered on fourth box.
+  G2 = gen_init_pdist(len(C), mu=60, sigma=math.sqrt(40))
+  M = Map(C, N, d, G1, 3, [-1, 0, 1])
   start(M, True, 5)
 
 if __name__ == '__main__':
