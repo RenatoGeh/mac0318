@@ -4,25 +4,27 @@ import matplotlib.pyplot as plt
 import matplotlib
 import math
 
+import USBInterface
+import usb
+
 # Utility functions.
 def _find_getch():
+  try:
+    import termios
+  except ImportError:
+    import msvcrt
+    return msvcrt.getch
+  import sys, tty
+  def _getch():
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
     try:
-        import termios
-    except ImportError:
-        import msvcrt
-        return msvcrt.getch
-    import sys, tty
-    def _getch():
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setraw(fd)
-            ch = sys.stdin.read(1)
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        return ch
-
-    return _getch
+      tty.setraw(fd)
+      ch = sys.stdin.read(1)
+    finally:
+      termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
+  return _getch
 getch = _find_getch()
 
 def pause_nofocus(interval):
@@ -39,6 +41,31 @@ def pause_nofocus(interval):
 def round_even(n):
   return round(n/2)*2
 
+# Signals.
+NOOP = '\x00'
+SEND = '\x01'
+RECV = '\x02'
+QUIT = '\x03'
+
+class Range:
+  # Arguments:
+  #  C - Commands (in positional increments), e.g. [-1, 0, 1] (left, noop, right).
+  #  M - Maximum steps for each command, e.g. [-25, 0, 25] (-25, 0, 25) steps.
+  def __init__(self, C, M):
+    self.C = C
+    self.M = M
+    self.R = []
+    for i, c in enumerate(C):
+      if c != 0:
+        self.R.extend(np.arange(0, M[i], c))
+    self.R = np.unique(self.R)
+    self.p = np.abs(np.min(M))-1 # pivot
+    self.N = self.R+self.p # normalized range
+
+  # Range.get(k) == normalized_range[pivot+k] == index of k (k can be negative).
+  def get(self, i):
+    return self.N[self.p+i]
+
 class Map:
   # Arguments:
   #  M - Map (each entry is an index for the gaussian array).
@@ -46,8 +73,8 @@ class Map:
   #  d - Distance between cells.
   #  P - Initial belief probability distribution.
   #  p - Precision (how many standard deviations from the mean should we precompute).
-  #  C - Commands (in positional increments).
-  def __init__(self, M, N, d, P, p, C):
+  #  R - Range.
+  def __init__(self, M, N, d, P, p, R):
     self.M, self.m = M, len(M)
     self.N, self.n = N, len(N)
     self.P = np.asarray(P)
@@ -56,8 +83,10 @@ class Map:
     for i in range(self.n):
       self.Mu[i], self.Sigma[i], self.Var[i] = self.N[i].mean(), self.N[i].std(), self.N[i].var()
     self.p = p
-    self.C, self.c = C, len(C)
+    self.R = R
+    self.C, self.c = R.R, len(R.R)
     self.d = d
+    self.B = None
     # Precompute matrices.
     self.precompute_sensor()
     self.precompute_action()
@@ -94,8 +123,8 @@ class Map:
     Pc = np.multiply(self.Pz[z], self.P)
     self.P = Pc/np.sum(Pc)
 
-  def prediction(self, u):
-    self.P = np.asarray(np.dot(self.Pxxu[u], self.P)).flatten()
+  def prediction(self, u, d):
+    self.P = np.asarray(np.dot(self.Pxxu[self.R.get(u*d)], self.P)).flatten()
 
   # Arguments:
   #  pos - True position (in cells).
@@ -114,27 +143,65 @@ class Map:
 
   # <robot>
 
-  def sensor(self):
-    return -1
+  # Attach Bot to this Map.
+  def attach(self, B):
+    self.B = B
 
-  def send_move(self, d):
-    return
+  def sensor(self):
+    try:
+      self.B.send(SEND)
+    except Exception as e:
+      print(e)
+    b = B.recv()
+    return int(b)
+
+  def send_move(self, u, d):
+    td = int(round(d*self.d))
+    try:
+      self.B.send(RECV)
+      self.B.send(u)
+      self.B.send(td)
+    except Exception as e:
+      print(e)
+
+  # Detach and shutdown Bot.
+  def detach(self):
+    try:
+      self.B.send(QUIT)
+    except Exception as e:
+      print(e)
+    self.B = None
 
   # </robot>
 
-  def move(self, u, d):
-    for i in range(d):
+  def move(self, u, d, corr):
+    if corr:
       if self.simulate:
         z = self.simulate_sensor()
       else:
         z = self.sensor()
       self.correction(z)
-      if self.simulate:
-        self.pos += self.C[u]
-      else:
-        self.send_move(u)
-      self.prediction(u)
+    if self.simulate:
+      self.pos += u*d
+    else:
+      self.send_move(u, d)
+    self.prediction(u, d)
 
+  def print(self):
+    print("Map Properties:")
+    print("  Sensor Gaussians:")
+    for i in range(len(self.Mu)):
+      print("    Means: " + str(self.Mu[i]) + " | Variance: " + str(self.Var[i]))
+    print("  Discretization bin size: " + str(self.m))
+    print("  True size of each bin: " + str(self.d))
+    print("  Size of precomputed probability matrices:")
+    print("    P(Z|X)    (sensor probability distribution): " + str(self.Pz.shape))
+    print("    P(X'|X,u) (action probability distribution): " + str(len(self.Pxxu)) + " x " + str(self.Pxxu[0].shape))
+    print("  Bot attached? " + str(self.B != None))
+    print("Range Properties:")
+    print("  Unique commands available: " + str(self.R.C))
+    print("  Bounds for number of steps: " + str(self.R.M))
+    print("  Pivot: " + str(self.R.p))
 
 # Arguments:
 #  n - Number of entries in map.
@@ -177,36 +244,49 @@ def new_config(b_mu, b_sigma, g_mu, g_sigma, C, starts_with='gap', bin_size=1000
   return M, [N_g, N_b], bD
 
 # Read controller commands.
-def read():
-  read_map = {'j': 0, 'k': 1, 'l': 2}
+def read(M):
+  read_map = {'j': -1, 'k': 0, 'l': 1}
   s = ''
   while True:
     c = getch()
     if c == 'h':
+      print("-------------------------")
       print("This controller works very much like vim. Available commands are:")
-      print("  j - Go left.")
-      print("  k - No-op. Don't move, but still compute values.")
-      print("  l - Go right.")
+      print("  j - Go left and apply correction and prediction.")
+      print("  k - No-op. Don't move, but apply correction and prediction.")
+      print("  l - Go right and apply correction and prediction.")
+      print("  i - Force correction only, with no prediction.")
+      print("  c - Shows the current model's constraints and localization settings.")
       print("  q - Quit.")
       print("  h - Show this help message")
+      print("Capitalized equivalents apply only prediction with no correction:")
+      print("  J - Go left and apply only prediction.")
+      print("  K - No-op. Don't move, but apply prediction only.")
+      print("  L - Go right and apply only prediction.")
       print("Every command can be quantified (just like vim!). A number before a command means "+\
             "the command should be repeated that many times. For example:")
-      print("  2j  - Go right and compute values twice sequentially.")
-      print("  10l - Go left and compute values ten times.")
-      print("  1k  - Compute values once and don't move.")
+      print("  2j  - Go right two units and then apply correction and prediction.")
+      print("  10L - Go left ten units and then apply only prediction.")
+      print("  1k  - Compute prediction and correction values and don't move.")
+      print("  5i  - Compute correction values five times.")
       print("When omitting a quantifier, the command assumes the quantifier is 1.")
+      print("-------------------------")
       continue
-    if c in read_map and not s:
-      return read_map[c], 1, False
+    elif c == 'c':
+      M.print() 
+      continue
+    _c = c.lower()
+    if _c in read_map and not s:
+      return read_map[c], 1, c.islower(), False
     if c.isdigit():
       s += c
-    elif c in read_map:
+    elif _c in read_map:
       d = int(s)
-      u = read_map[c]
-      return u, d, False
+      u = read_map[_c]
+      return u, d, c.islower(), False
     elif c == 'q':
       print("Bye.")
-      return -1, -1, True
+      return -1, -1, False, True
     else:
       print("Error when parsing command: " + s + c + ". Try again.")
 
@@ -227,25 +307,40 @@ def draw_graph(P, M, pos, r):
 
 # Start.
 def start(M, simulate, p):
-  cmds = ['left', 'noop', 'right']
+  cmds = ['noop', 'right', 'left']
   if simulate:
     M.start_simulation(p)
+  else:
+    B = init_bot()
+    M.attach(B)
   plt.ion()
   running = False
   print("Ready. Press h for help message.")
   while True:
     running = draw_graph(M.P, M.M, M.pos, running)
-    u, d, e = read()
+    u, d, c, e = read(M)
     if e:
       break
     print("Moving " + cmds[u] + " " + str(d) + " units...")
     if simulate:
       print("  True position before moving: " + str(M.pos))
-    M.move(u, d)
+    M.move(u, d, c)
     if simulate:
       print("  True position after moving: " + str(M.pos))
   if simulate:
     M.stop_simulation()
+  else:
+    M.detach()
+
+def init_bot():
+  r_exc = False
+  try:
+    B = next(USBInterface.find_bricks(debug=False))
+    B.connect()
+  except usb.core.NoBackendError:
+    r_exc = True
+  assert r_exc == 0, "No NXT found..."
+  return B
 
 def run():
   C, N, d = new_config(15, 1, 10, 1, [5, 10, 15, 10, 20, 10, 30, 10, 15, 10, 20, 10, 5], bin_size=100)
@@ -255,7 +350,7 @@ def run():
   G1 = gen_init_pdist(len(C), mu=20, sigma=math.sqrt(40))
   # Gaussian initial belief centered on fourth box.
   G2 = gen_init_pdist(len(C), mu=60, sigma=math.sqrt(40))
-  M = Map(C, N, d, G1, 3, [-1, 0, 1])
+  M = Map(C, N, d, G1, 3, Range([-1, 0, 1], [-25, 0, 25]))
   start(M, True, 5)
 
 if __name__ == '__main__':
