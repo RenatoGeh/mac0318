@@ -51,7 +51,7 @@ class Range:
   # Arguments:
   #  C - Commands (in positional increments), e.g. [-1, 0, 1] (left, noop, right).
   #  M - Maximum steps for each command, e.g. [-25, 0, 25] (-25, 0, 25) steps.
-  def __init__(self, C, M):
+  def __init__(self, C, M, s):
     self.C = C
     self.M = M
     self.R = []
@@ -61,6 +61,7 @@ class Range:
     self.R = np.unique(self.R)
     self.p = np.abs(np.min(M))-1 # pivot
     self.N = self.R+self.p # normalized range
+    self.s = math.sqrt(s)
 
   # Range.get(k) == normalized_range[pivot+k] == index of k (k can be negative).
   def get(self, i):
@@ -113,7 +114,7 @@ class Map:
     self.Pxxu = [None for i in range(self.c)]
     for u in range(self.c):
       for x in range(self.m):
-        N = stats.norm(x+self.C[u])
+        N = stats.norm(x+self.C[u], self.R.s)
         a = N.pdf(np.arange(self.m))
         _Pxxu[u][x] = a/np.sum(a)
       _Pxxu[u] = np.asarray(_Pxxu[u])
@@ -174,7 +175,7 @@ class Map:
 
   # </robot>
 
-  def move(self, u, d, corr):
+  def move(self, u, d, corr, pred):
     if corr:
       if self.simulate:
         z = self.simulate_sensor()
@@ -185,7 +186,8 @@ class Map:
       self.pos += u*d
     else:
       self.send_move(u, d)
-    self.prediction(u, d)
+    if pred:
+      self.prediction(u, d)
 
   def print(self):
     print("Map Properties:")
@@ -202,6 +204,7 @@ class Map:
     print("  Unique commands available: " + str(self.R.C))
     print("  Bounds for number of steps: " + str(self.R.M))
     print("  Pivot: " + str(self.R.p))
+    print("  Variance for action probability: " + str(self.R.s))
 
 # Arguments:
 #  n - Number of entries in map.
@@ -245,59 +248,61 @@ def new_config(b_mu, b_sigma, g_mu, g_sigma, C, starts_with='gap', bin_size=1000
 
 # Read controller commands.
 def read(M):
-  read_map = {'j': -1, 'k': 0, 'l': 1}
+  read_map = {'h': -1, 'j': 0, 'k': 0, 'l': 1}
   s = ''
   while True:
     c = getch()
-    if c == 'h':
+    print(c)
+    if c == '?':
       print("-------------------------")
       print("This controller works very much like vim. Available commands are:")
-      print("  j - Go left and apply correction and prediction.")
-      print("  k - No-op. Don't move, but apply correction and prediction.")
+      print("  h - Go left and apply correction and prediction.")
+      print("  j - No-op. Don't move, but apply correction and prediction.")
       print("  l - Go right and apply correction and prediction.")
-      print("  i - Force correction only, with no prediction.")
+      print("  k - Force correction only, with no prediction.")
       print("  c - Shows the current model's constraints and localization settings.")
       print("  q - Quit.")
-      print("  h - Show this help message")
+      print("  ? - Show this help message")
       print("Capitalized equivalents apply only prediction with no correction:")
-      print("  J - Go left and apply only prediction.")
-      print("  K - No-op. Don't move, but apply prediction only.")
+      print("  H - Go left and apply only prediction.")
+      print("  J - No-op. Don't move, but apply prediction only.")
+      print("  K - No-op. Applies correction. The same as k.")
       print("  L - Go right and apply only prediction.")
       print("Every command can be quantified (just like vim!). A number before a command means "+\
             "the command should be repeated that many times. For example:")
-      print("  2j  - Go right two units and then apply correction and prediction.")
-      print("  10L - Go left ten units and then apply only prediction.")
-      print("  1k  - Compute prediction and correction values and don't move.")
-      print("  5i  - Compute correction values five times.")
+      print("  2l  - Go right two units and then apply correction and prediction.")
+      print("  10H - Go left ten units and then apply only prediction.")
+      print("  j   - Compute prediction and correction values and don't move.")
+      print("  5k  - Compute correction values five times.")
       print("When omitting a quantifier, the command assumes the quantifier is 1.")
       print("-------------------------")
       continue
     elif c == 'c':
-      M.print() 
+      M.print()
       continue
     _c = c.lower()
     if _c in read_map and not s:
-      return read_map[c], 1, c.islower(), False
+      return read_map[c], 1, c.islower(), _c != 'k', False
     if c.isdigit():
       s += c
     elif _c in read_map:
       d = int(s)
       u = read_map[_c]
-      return u, d, c.islower(), False
+      return u, d, c.islower(), _c != 'k', False
     elif c == 'q':
       print("Bye.")
-      return -1, -1, False, True
+      return -1, -1, False, False, True
     else:
       print("Error when parsing command: " + s + c + ". Try again.")
 
 # Draw graph plot.
-def draw_graph(P, M, pos, r):
+def draw_graph(P, M, pos, r, simulate):
   m = len(M)
   plt.clf()
   plt.axis([0, m, 0, 1])
   B = plt.bar(np.arange(m), P)
   for i in range(m):
-    B[i].set_color('blue' if pos == i else 'yellow' if M[i] == 0 else 'red')
+    B[i].set_color('blue' if (simulate and pos == i) else 'yellow' if M[i] == 0 else 'red')
   plt.draw()
   if not r:
     plt.pause(0.05)
@@ -306,25 +311,25 @@ def draw_graph(P, M, pos, r):
   return True
 
 # Start.
-def start(M, simulate, p):
+def start(M, simulate, pos):
   cmds = ['noop', 'right', 'left']
   if simulate:
-    M.start_simulation(p)
+    M.start_simulation(pos)
   else:
     B = init_bot()
     M.attach(B)
   plt.ion()
   running = False
-  print("Ready. Press h for help message.")
+  print("Ready. Press ? for help message.")
   while True:
-    running = draw_graph(M.P, M.M, M.pos, running)
-    u, d, c, e = read(M)
+    running = draw_graph(M.P, M.M, M.pos, running, simulate)
+    u, d, c, p, e = read(M)
     if e:
       break
     print("Moving " + cmds[u] + " " + str(d) + " units...")
     if simulate:
       print("  True position before moving: " + str(M.pos))
-    M.move(u, d, c)
+    M.move(u, d, c, p)
     if simulate:
       print("  True position after moving: " + str(M.pos))
   if simulate:
@@ -350,7 +355,7 @@ def run():
   G1 = gen_init_pdist(len(C), mu=20, sigma=math.sqrt(40))
   # Gaussian initial belief centered on fourth box.
   G2 = gen_init_pdist(len(C), mu=60, sigma=math.sqrt(40))
-  M = Map(C, N, d, G1, 3, Range([-1, 0, 1], [-25, 0, 25]))
+  M = Map(C, N, d, G1, 3, Range([-1, 0, 1], [-50, 0, 50], 4))
   start(M, True, 5)
 
 if __name__ == '__main__':

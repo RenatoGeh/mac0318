@@ -1,0 +1,319 @@
+\documentclass[12pt]{article}
+
+\usepackage[brazilian]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{mathtools}
+\usepackage{amsthm}
+\usepackage{thmtools,thm-restate}
+\usepackage{amsfonts}
+\usepackage{hyperref}
+\usepackage[singlelinecheck=false]{caption}
+\usepackage{enumitem}
+\usepackage[justification=centering]{caption}
+\usepackage{indentfirst}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{listings}
+\usepackage[x11names,rgb,table]{xcolor}
+\usepackage{tikz}
+\usepackage{hyperref}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{linegoal}
+\usepackage{geometry}
+\usepackage{interval}
+\usetikzlibrary{snakes,arrows,shapes}
+
+\graphicspath{{imgs/}}
+
+\makeatletter
+\def\subsection{\@startsection{subsection}{3}%
+  \z@{.5\linespacing\@plus.7\linespacing}{.1\linespacing}%
+  {\normalfont}}
+\makeatother
+
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\Val}{\text{Val}}
+\DeclareMathOperator*{\Ch}{\text{Ch}}
+\DeclareMathOperator*{\Pa}{\text{Pa}}
+\DeclareMathOperator*{\Sc}{\text{Sc}}
+\newcommand{\ov}{\overline}
+\newcommand{\tsup}{\textsuperscript}
+
+\newcommand\defeq{\mathrel{\overset{\makebox[0pt]{\mbox{\normalfont\tiny\sffamily def}}}{=}}}
+
+\newcommand{\algorithmautorefname}{Algorithm}
+\algrenewcommand\algorithmicrequire{\textbf{Input}}
+\algrenewcommand\algorithmicensure{\textbf{Output}}
+\algnewcommand{\LineComment}[1]{\State\,\(\triangleright\) #1}
+
+\captionsetup[table]{labelsep=space}
+
+\theoremstyle{plain}
+
+\newcounter{dummy-def}\numberwithin{dummy-def}{section}
+\newtheorem{definition}[dummy-def]{Definition}
+\newcounter{dummy-thm}\numberwithin{dummy-thm}{section}
+\newtheorem{theorem}[dummy-thm]{Theorem}
+\newcounter{dummy-prop}\numberwithin{dummy-prop}{section}
+\newtheorem{proposition}[dummy-prop]{Proposition}
+\newcounter{dummy-corollary}\numberwithin{dummy-corollary}{section}
+\newtheorem{corollary}[dummy-corollary]{Corollary}
+\newcounter{dummy-lemma}\numberwithin{dummy-lemma}{section}
+\newtheorem{lemma}[dummy-lemma]{Lemma}
+\newcounter{dummy-ex}\numberwithin{dummy-ex}{section}
+\newtheorem{exercise}[dummy-ex]{Exercise}
+\newcounter{dummy-eg}\numberwithin{dummy-eg}{section}
+\newtheorem{example}[dummy-eg]{Example}
+
+\numberwithin{equation}{section}
+
+\newcommand{\set}[1]{\mathbf{#1}}
+\newcommand{\pr}{\mathbb{P}}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\ddspn}[2]{\frac{\partial#1}{\partial#2}}
+\newcommand{\iddspn}[2]{\partial#1/\partial#2}
+\renewcommand{\implies}{\Rightarrow}
+
+\newcommand{\bigo}{\mathcal{O}}
+
+\setlength{\parskip}{1em}
+
+\lstset{frameround=fttt,
+  frame=single,
+  keepspaces=true,
+	breaklines=true,
+	keywordstyle=\bfseries,
+	basicstyle=\footnotesize\ttfamily,
+  language=Python
+}
+
+\newcommand{\code}[1]{\lstinline[mathescape=true]{#1}}
+\newcommand{\mcode}[1]{\lstinline[mathescape]!#1!}
+
+\newgeometry{margin=1in}
+\title{%
+  \textbf{Relatório MAC0318 EP5}\\
+  \author{Renato Lui Geh --- NUSP\@: 8536030}
+}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Definições e notação}
+
+Vamos chamar de $X$ a variável aleatória discreta e finita que representa em que pedaço do espaço
+unidimensional discretizado o robô está. Então $P(X=x)$ é a probabilidade do robô estar na
+``célula'' $x$. Vou chamar de $m$ o número de células total. Suponha que o espaço unidimensional
+mede $d$. Vou chamar de $\ov{d}$ o tamanho de cada célula, ou seja, $\ov{d}=\lfloor d/m\rfloor$.
+
+A variável aleatória discreta e finita $Z$ representa o sonar. Como dito no enunciado,
+$Z\sim\mathcal{N}$. As gaussianas representando os erros e ruídos do sonar quando captando as
+caixas e buracos serão denotadas por $\mathcal{N}_b$ e $\mathcal{N}_g$ respectivamente.
+
+Na probabilidade de ação $P(X'=x'|X=x,u)$, $X'$ é a variável aleatória da posição do robô na célula
+$x'$ após a ação $u$.
+
+\section{Execução}
+
+Para rodar o EP5, é só rodar com \code{python3} sem argumentos.\\
+
+\begin{lstlisting}
+python3 localization.py
+\end{lstlisting}
+
+Assim que o código terminar de pré-computar as matrizes de probabilidade, o programa vai abrir uma
+janela com um histograma da distribuição de probabilidade $P(X)$, onde cada barra é uma célula.
+Neste histograma, células vermelhas representam caixas e amarelas representam os buracos. Uma
+célula azul indica a posição verdadeira do robô.
+
+Após aberto o histograma, o programa continuará rodando a espera de \textit{input}. A tela mostrará
+algo semelhante a:\\
+
+\begin{lstlisting}
+Starting simulation at position: 5
+Ready. Press ? for help message.
+\end{lstlisting}
+
+Os comandos para o programa funcionam igual ao \texttt{NORMAL mode} do Vim. Um comando é
+representado por um caractere. O caractere pode conter um quantificador (um número) que altera o
+comportamento do comando. Abaixo segue a lista de comandos dada pelo comando de ajuda \code{?}:\\
+
+\begin{lstlisting}
+-------------------------
+This controller works very much like vim. Available commands are:
+  h - Go left and apply correction and prediction.
+  j - No-op. Dont move, but apply correction and prediction.
+  l - Go right and apply correction and prediction.
+  k - Force correction only, with no prediction.
+  c - Shows the current models constraints and localization settings.
+  q - Quit.
+  ? - Show this help message
+Capitalized equivalents apply only prediction with no correction:
+  H - Go left and apply only prediction.
+  J - No-op. Dont move, but apply prediction only.
+  K - No-op. Applies correction. The same as k.
+  L - Go right and apply only prediction.
+Every command can be quantified (just like vim!). A number before a command means the command should be repeated that many times. For example:
+  2l  - Go right two units and then apply correction and prediction.
+  10H - Go left ten units and then apply only prediction.
+  j   - Compute prediction and correction values and dont move.
+  5k  - Compute correction values five times.
+When omitting a quantifier, the command assumes the quantifier is 1.
+-------------------------
+\end{lstlisting}
+
+Os comandos são lidos em tempo-real, então logo que o programa receber um comando válido, ele o
+executará. Assim não é preciso ficar apertando Enter para validar o input. Se o comando não for
+válido, o programa descartará o input anterior e pedirá uma nova sequência de caracteres para
+input.
+
+Quando aberto, o histograma é posto em foco. Esta será a única vez que a janela será dada
+foco. É possível manter a janela aberta de lado enquanto são dados os comandos que isso não fará
+com que o foco seja alterado. Em vários Desktop Environments, colocar a janela em ``Always on top''
+pode facilitar a vida.
+
+Como a mensagem de ajuda mostra, o quantificador modifica o comportamento do comando. Omitir este
+quantificador é a mesma coisa que se o quantificador fosse 1.
+
+Após cada comando de movimento ou computação, uma mensagem indicará qual comando foi feito e quais
+são as posições reais do robô antes e depois do movimento.
+
+O programa não lida casos em que o robô fosse sair do espaço (quando a posição do robô é maior ou
+igual a $m$ ou menor que 0).
+
+O comando \code{c} imprime informações úteis do mapa, gaussianas e do \code{Range} (que será
+comentado posteriormente). O robô não pode andar mais do que o que estiver determinado em ``Bounds
+for number of steps'' de uma só vez. Por exemplo:
+
+\begin{lstlisting}
+Map Properties:
+  Sensor Gaussians:
+    Means: 10.0 | Variance: 1.0
+    Means: 15.0 | Variance: 1.0
+  Discretization bin size: 100
+  True size of each bin: 1.7
+  Size of precomputed probability matrices:
+    P(Z|X)    (sensor probability distribution): (20, 100)
+    P(X|X,u) (action probability distribution): 49 x (100, 100)
+  Bot attached? False
+Range Properties:
+  Unique commands available: [-1, 0, 1]
+  Bounds for number of steps: [-25, 0, 25]
+  Pivot: 24
+\end{lstlisting}
+
+Neste caso, o comando \code{25l} não deve ser executado. No entanto, \code{24l} pode. A razão por
+trás disso é que este valor é o que foi pré-computado na matriz de probabilidade para até 24 passos
+de uma só vez. É possível aumentar este valor, como será visto na próxima seção.
+
+\section{Configurações}
+
+Para mudar a configuração do espaço, das gaussianas, matrizes de probabilidade ou discretização, é
+preciso mudar o próprio código. Para isso, foram criadas algumas funções.
+
+A função \code{new_config} cria uma nova configuração de mapa. Ela toma como argumentos (em ordem):
+
+\begin{enumerate}
+  \item $\mu_b$: Média da gaussiana do sonar para as caixas.
+  \item $\sigma_b$: Variância da gaussiana do sonar para as caixas.
+  \item $\mu_g$: Média da gaussiana do sonar para os buracos.
+  \item $\sigma_g$: Variância da gaussiana do sonar para os buracos.
+  \item $C$: Vetor de distâncias.
+  \item \mcode{starts_with$\in\{$\"gap\"$, $\"box\"$\}$}: Estado inicial.
+  \item $b$: Número de bins para discretização.
+\end{enumerate}
+
+As gaussianas $\mathcal{N}_b(\mu_b, \sigma_b)$ e $\mathcal{N}_g(\mu_g, \sigma_g)$ são as
+distribuições de probabilidade para os erros e ruídos do sonar.
+
+O vetor de distâncias $C$ é um vetor onde cada entrada $i$ representa a distância do $i$-ésimo
+objeto (caixa ou buraco) até o $i+1$-ésimo objeto. Junto com \code{starts_with}, que indica se $C$
+começa com uma caixa ou buraco, $C$ representa o ambiente unidimensional inteiro.
+
+O argumento $b$ é o número de bins para discretização. Supondo que $C$ é dado em centímetros, então
+se $b=\sum_{i=0}^{|C|-1} C_i$, então cada bin terá tamanho de 1 centímetro.
+
+A função retorna três objetos:
+
+\begin{enumerate}
+  \item $M$: Mapa de tamanho $b$, com $M_i=0$ se a célula $i$ é buraco e $M_i=1$ se é caixa.
+  \item $(\mathcal{N}_g,\mathcal{N}_b)$: Par ordenado com as gaussianas relevantes.
+  \item $\ov{d}$: Tamanho de cada célula na mesma unidade dada em $C$.
+\end{enumerate}
+
+A função \code{new_config} então cria um mapa do espaço discretizado e cria as gaussianas para o
+sensor. No código original temos:\\
+
+\begin{lstlisting}
+C, N, d = new_config(15, 1, 10, 1, [5, 10, 15, 10, 20, 10, 30, 10, 15, 10, 20, 10, 5], bin_size=100)
+\end{lstlisting}
+
+Após criado o mapa do espaço, devemos criar a distribuição de probabilidade $P(X)$ inicial. Para
+isso, usamos a função \code{gen_init_pdist}, que toma como argumentos:
+
+\begin{enumerate}
+  \item $n$: Número de valores possíveis para $X$, ou seja, número total de células.
+  \item $\mu$: Média para gaussiana.
+  \item $\sigma$: Variância para gaussiana.
+  \item $s$: Tamanho de amostras para gerar a distribuição.
+  \item $u$: Booleana que indica se a distribuição é uniforme.
+\end{enumerate}
+
+A função gera ou uma uniforme de $\mathcal{U}(0, n)$ ou uma gaussiana $\mathcal{N}(\mu,\sigma)$. Se
+$u$ for \code{True}, então ignora-se todos os argumentos menos $n$. Caso contrário, serão geradas
+$s$ amostras de uma gaussiana $\mathcal{N}(\mu,\sigma)$ para formar a distribuição inicial.
+
+O valor de retorno da função é um vetor $P$ distribuição de probabilidade com $n$ entradas. No
+código original temos:\\
+
+\begin{lstlisting}
+# Uniform initial belief.
+U = gen_init_pdist(len(C), uniform=True)
+# Gaussian initial belief centered on second box.
+G1 = gen_init_pdist(len(C), mu=20, sigma=math.sqrt(40))
+# Gaussian initial belief centered on fourth box.
+G2 = gen_init_pdist(len(C), mu=60, sigma=math.sqrt(40))
+\end{lstlisting}
+
+Finalmente, criamos um objeto da classe \code{Map}. O construtor toma os valores de retorno das
+funções acima e mais dois argumentos.
+
+\begin{enumerate}
+  \item $C$: Mapa das células.
+  \item $N$: Par de gaussianas dos sensores.
+  \item $d$: Tamanho real de cada célula.
+  \item $P$: Distribuição de probabilidade inicial $P(X)$.
+  \item $p$: Precisão das matrizes pré-computadas.
+  \item $R$: Objeto da classe \code{Range}.
+\end{enumerate}
+
+Quando pré-computamos as matrizes de probabilidade, consideramos a área das gaussianas entre
+$[-p\sigma,+p\sigma]$, onde $\sigma$ é o desvio padrão. Então com $p=3$, cobrimos 99.7\% da
+distribuição.
+
+A classe \code{Range} representa quais são os possíveis movimentos do robô. Além disso, também
+limita o número de passos pré-computados e define a variância da gaussiana para a probabilidade de
+ação $P(X'=x'|X=x,u)$. O construtor de Range recebe:
+
+\begin{enumerate}
+  \item $M$: Possíveis movimentações.
+  \item $B$: Bounds para movimentação.
+  \item $\sigma$: Variância para gaussiana da probabilidade de ação.
+\end{enumerate}
+
+Portanto, temos no código original:\\
+
+\begin{lstlisting}
+M = Map(C, N, d, G1, 3, Range([-1, 0, 1], [-25, 0, 25], 4))
+\end{lstlisting}
+
+O último argumento modificável é a posição inicial do robô. A função \code{start} tem como terceiro
+argumento um número no intervalo $\interval[open right]{0}{m}$, onde $m$ é o número total de
+células. Este número indica onde o robô começará.
+
+\end{document}
