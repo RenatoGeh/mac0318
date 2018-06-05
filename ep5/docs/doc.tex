@@ -316,4 +316,35 @@ O último argumento modificável é a posição inicial do robô. A função \co
 argumento um número no intervalo $\interval[open right]{0}{m}$, onde $m$ é o número total de
 células. Este número indica onde o robô começará.
 
+\section{Observações}
+
+Quando o robô se move por um comando, o simulator decide a movimentação por meio da gaussiana
+$\mathcal{N}(\mu=x+d,\sigma)$, onde $x$ é a célula em que o robô está e $d$ é o quanto que o
+usuário deseja que robô ande. A variância $\sigma$ é dada pela variância descrita na classe
+\code{Range}. A movimentação real é uma amostragem desta gaussiana, e portanto aleatória. Não sabia
+se esta movimentação devia ser determinística, então deixei aleatória para ficar mais geral. A
+linha em que se computa essa amostragem é 187:\\
+
+\begin{lstlisting}
+dp = int(round(stats.norm(self.pos+u*d, self.R.s).rvs()))
+self.pos = min(max(0, dp), self.m-1)
+\end{lstlisting}
+
+Se a movimentação deveria ser determinística, é possível alterar as duas linhas na seguinte:\\
+
+\begin{lstlisting}
+self.pos += u*d
+\end{lstlisting}
+
+A variância talvez esteja muito alta. Neste caso, para mudar a variância, basta mudar a variância
+do \code{Range}.\\
+
+\begin{lstlisting}
+Range([-1, 0, 1], [-50, 0, 50], sigma)
+\end{lstlisting}
+
+Se $\sigma$ é muito baixo, talvez seja necessário diminuir os bounds definidos no Range. Isso é por
+que, se a variância é muito baixa, os valores pré-computados ficam muito próximo de zero, e
+portanto pode ser que a matriz seja divida por zero.
+
 \end{document}

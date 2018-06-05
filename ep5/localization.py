@@ -183,7 +183,8 @@ class Map:
         z = self.sensor()
       self.correction(z)
     if self.simulate:
-      self.pos += u*d
+      dp = int(round(stats.norm(self.pos+u*d, self.R.s).rvs()))
+      self.pos = min(max(0, dp), self.m-1)
     else:
       self.send_move(u, d)
     if pred:
