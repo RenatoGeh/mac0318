@@ -23,6 +23,7 @@
 \usepackage{linegoal}
 \usepackage{geometry}
 \usepackage{interval}
+\usepackage[normalem]{ulem}
 \usetikzlibrary{snakes,arrows,shapes}
 
 \graphicspath{{imgs/}}
@@ -120,16 +121,21 @@ $x'$ após a ação $u$.
 
 \section{Execução}
 
-Para rodar o EP5, é só rodar com \code{python3} sem argumentos.\\
+Para rodar o EP5, é só rodar com \code{python3}. Se o script for rodado sem argumentos, então o
+código esperará que o robô Lejos esteja conectado por cabo USB\@. Para rodar apenas a simulação, rode
+com qualquer um dos argumentos abaixo:\\
 
 \begin{lstlisting}
-python3 localization.py
+python3 localization.py -s
+python3 localization.py --simulate
 \end{lstlisting}
 
 Assim que o código terminar de pré-computar as matrizes de probabilidade, o programa vai abrir uma
-janela com um histograma da distribuição de probabilidade $P(X)$, onde cada barra é uma célula.
-Neste histograma, células vermelhas representam caixas e amarelas representam os buracos. Uma
-célula azul indica a posição verdadeira do robô.
+janela com um histograma da distribuição de probabilidade $P(X)$. Neste histograma, as barras
+vermelhas e amarelas são as probabilidades do robô estar nas respectivas células. Quando uma barra
+aparece em vermelho, é por que existe uma caixa na célula. Quando a barra aparece amarela, a célula
+não possue caixa. O fundo é colorido de acordo com as caixas e buracos, onde laranja indica caixa e
+verde vazio. Uma barra azul indica a posição real do robô durante a simulação.
 
 Após aberto o histograma, o programa continuará rodando a espera de \textit{input}. A tela mostrará
 algo semelhante a:\\
@@ -183,12 +189,14 @@ quantificador é a mesma coisa que se o quantificador fosse 1.
 Após cada comando de movimento ou computação, uma mensagem indicará qual comando foi feito e quais
 são as posições reais do robô antes e depois do movimento.
 
-O programa não lida casos em que o robô fosse sair do espaço (quando a posição do robô é maior ou
-igual a $m$ ou menor que 0).
+Se o robô fosse sair do intervalo $\interval[open right]{0}{m}$, o robô permanece nos bounds (0 ou
+$m$).
 
 O comando \code{c} imprime informações úteis do mapa, gaussianas e do \code{Range} (que será
-comentado posteriormente). O robô não pode andar mais do que o que estiver determinado em ``Bounds
-for number of steps'' de uma só vez. Por exemplo:
+comentado posteriormente). \sout{O robô não pode andar mais do que o que estiver determinado em ``Bounds
+for number of steps'' de uma só vez}. Como agora a matriz de probabilidade de ação não é mais
+pré-computada, e ao invés disso as probabilidades são computadas durante a movimentação, o robô não
+tem mais limite de passos em uma iteração. Por exemplo:\\
 
 \begin{lstlisting}
 Map Properties:
@@ -199,17 +207,12 @@ Map Properties:
   True size of each bin: 1.7
   Size of precomputed probability matrices:
     P(Z|X)    (sensor probability distribution): (20, 100)
-    P(X|X,u) (action probability distribution): 49 x (100, 100)
   Bot attached? False
 Range Properties:
   Unique commands available: [-1, 0, 1]
   Bounds for number of steps: [-25, 0, 25]
   Pivot: 24
 \end{lstlisting}
-
-Neste caso, o comando \code{25l} não deve ser executado. No entanto, \code{24l} pode. A razão por
-trás disso é que este valor é o que foi pré-computado na matriz de probabilidade para até 24 passos
-de uma só vez. É possível aumentar este valor, como será visto na próxima seção.
 
 \section{Configurações}
 
@@ -296,20 +299,21 @@ Quando pré-computamos as matrizes de probabilidade, consideramos a área das ga
 $[-p\sigma,+p\sigma]$, onde $\sigma$ é o desvio padrão. Então com $p=3$, cobrimos 99.7\% da
 distribuição.
 
-A classe \code{Range} representa quais são os possíveis movimentos do robô. Além disso, também
+A classe \code{Range} representa quais são os possíveis movimentos do robô. \sout{Além disso, também
 limita o número de passos pré-computados e define a variância da gaussiana para a probabilidade de
-ação $P(X'=x'|X=x,u)$. O construtor de Range recebe:
+ação $P(X'=x'|X=x,u)$}. Como agora a matriz $P(X'=x'|X=x,u)$ não é mais pré-computada, Range apenas
+serve para armazenar os possíveis comandos. O construtor de Range recebe:
 
 \begin{enumerate}
   \item $M$: Possíveis movimentações.
-  \item $B$: Bounds para movimentação.
-  \item $\sigma$: Variância para gaussiana da probabilidade de ação.
+  \item $B$: Bounds para movimentação (se a matriz não é pré-computada, não se usa $B$).
+  \item $\sigma$: Percentagem da variância para gaussiana da probabilidade de ação.
 \end{enumerate}
 
 Portanto, temos no código original:\\
 
 \begin{lstlisting}
-M = Map(C, N, d, G1, 3, Range([-1, 0, 1], [-25, 0, 25], 4))
+M = Map(C, N, d, G1, 3, Range([-1, 0, 1], [-25, 0, 25], 0.5))
 \end{lstlisting}
 
 O último argumento modificável é a posição inicial do robô. A função \code{start} tem como terceiro
@@ -319,32 +323,23 @@ células. Este número indica onde o robô começará.
 \section{Observações}
 
 Quando o robô se move por um comando, o simulator decide a movimentação por meio da gaussiana
-$\mathcal{N}(\mu=x+d,\sigma)$, onde $x$ é a célula em que o robô está e $d$ é o quanto que o
+$\mathcal{N}(\mu=x+d,\sigma=pd)$, onde $x$ é a célula em que o robô está e $d$ é o quanto que o
 usuário deseja que robô ande. A variância $\sigma$ é dada pela variância descrita na classe
-\code{Range}. A movimentação real é uma amostragem desta gaussiana, e portanto aleatória. Não sabia
-se esta movimentação devia ser determinística, então deixei aleatória para ficar mais geral. A
-linha em que se computa essa amostragem é 187:\\
+\code{Range} multiplicado a distância (e.g.\ se $p=0.1$, então a variância será 10\% da distância a
+se percorrer). A movimentação real é uma amostragem desta gaussiana, e portanto aleatória. A
+linha em que se computa essa amostragem:\\
 
 \begin{lstlisting}
-dp = int(round(stats.norm(self.pos+u*d, self.R.s).rvs()))
-self.pos = min(max(0, dp), self.m-1)
+mu = self.pos+u*d
+std = abs(u*d*self.R.p)
+dp = int(round(stats.norm(mu, math.sqrt(std)).rvs()))
+self.pos = min(max(0, dp), self.m-1) 
 \end{lstlisting}
 
-Se a movimentação deveria ser determinística, é possível alterar as duas linhas na seguinte:\\
-
-\begin{lstlisting}
-self.pos += u*d
-\end{lstlisting}
-
-A variância talvez esteja muito alta. Neste caso, para mudar a variância, basta mudar a variância
-do \code{Range}.\\
-
-\begin{lstlisting}
-Range([-1, 0, 1], [-50, 0, 50], sigma)
-\end{lstlisting}
-
-Se $\sigma$ é muito baixo, talvez seja necessário diminuir os bounds definidos no Range. Isso é por
-que, se a variância é muito baixa, os valores pré-computados ficam muito próximo de zero, e
-portanto pode ser que a matriz seja divida por zero.
+Quando $p$ é muito baixo ($\approx 10\%$), as probabilidades ficam muito degeneradas (o modelo
+supõe com muita certeza --- ou talvez pouca incerteza --- onde ele supostamente deveria estar).
+Quando $p$ é razoavelmente alto ($\approx 50\%$), as probabilidades ficam mais incertas, com várias
+seções do histograma parecendo mais com gaussianas. O meio termo ($\approx 25\%$) é o caso mais
+razoável.
 
 \end{document}

@@ -6,6 +6,7 @@ import math
 
 import USBInterface
 import usb
+import sys
 
 # Utility functions.
 def _find_getch():
@@ -51,7 +52,7 @@ class Range:
   # Arguments:
   #  C - Commands (in positional increments), e.g. [-1, 0, 1] (left, noop, right).
   #  M - Maximum steps for each command, e.g. [-25, 0, 25] (-25, 0, 25) steps.
-  def __init__(self, C, M, s):
+  def __init__(self, C, M, p):
     self.C = C
     self.M = M
     self.R = []
@@ -59,13 +60,13 @@ class Range:
       if c != 0:
         self.R.extend(np.arange(0, M[i], c))
     self.R = np.unique(self.R)
-    self.p = np.abs(np.min(M))-1 # pivot
-    self.N = self.R+self.p # normalized range
-    self.s = math.sqrt(s)
+    self.pivot = np.abs(np.min(M))-1 # pivot
+    self.N = self.R+self.pivot # normalized range
+    self.p = p
 
   # Range.get(k) == normalized_range[pivot+k] == index of k (k can be negative).
   def get(self, i):
-    return self.N[self.p+i]
+    return self.N[self.pivot+i]
 
 class Map:
   # Arguments:
@@ -88,9 +89,10 @@ class Map:
     self.C, self.c = R.R, len(R.R)
     self.d = d
     self.B = None
+    self.simulate = False
     # Precompute matrices.
     self.precompute_sensor()
-    self.precompute_action()
+    #self.precompute_action()
 
   def precompute_sensor(self):
     # Pz[z] = P(Z=z|X)
@@ -103,7 +105,9 @@ class Map:
       r = int(round(self.p*m_s))+2
       for z in range(r):
         s = self.Mu[t] + z
-        _Pz[int(round(s))][x] = self.N[t].pdf(s)
+        i, j = int(round(s)), int(round(self.Mu[t]-z))
+        _Pz[i][x] = self.N[t].pdf(s)
+        _Pz[j][x] = self.N[t].pdf(s)
     self.Pz = np.asarray(_Pz)
 
   def precompute_action(self):
@@ -114,18 +118,37 @@ class Map:
     self.Pxxu = [None for i in range(self.c)]
     for u in range(self.c):
       for x in range(self.m):
-        N = stats.norm(x+self.C[u], self.R.s)
+        mu, partial = x+self.C[u], self.R.p*self.C[u]
+        std = abs(partial) if u != 0 else 2.0
+        N = stats.norm(mu, std)
         a = N.pdf(np.arange(self.m))
         _Pxxu[u][x] = a/np.sum(a)
       _Pxxu[u] = np.asarray(_Pxxu[u])
       self.Pxxu[u] = np.asmatrix(_Pxxu[u]).T
 
+  def action(self, u):
+    _Pxxu = [[0 for i in range(self.m)] for j in range(self.m)]
+    for x in range(self.m):
+      mu, partial = x+u, self.R.p*u
+      std = math.sqrt(abs(partial))
+      N = stats.norm(mu, std)
+      a = N.pdf(np.arange(self.m))
+      _Pxxu[x] = a/np.sum(a)
+    M = np.asmatrix(_Pxxu).T
+    return M
+
   def correction(self, z):
     Pc = np.multiply(self.Pz[z], self.P)
+    if np.sum(Pc) == 0:
+      Pc = np.ones(len(Pc))
     self.P = Pc/np.sum(Pc)
 
   def prediction(self, u, d):
-    self.P = np.asarray(np.dot(self.Pxxu[self.R.get(u*d)], self.P)).flatten()
+    #P_act = self.Pxxu[self.R.get(u*d)]
+    P_act = self.action(u*d)
+    P = np.asmatrix(self.P).T
+    M = np.matmul(P_act, P)
+    self.P = np.asarray(M).flatten()
 
   # Arguments:
   #  pos - True position (in cells).
@@ -153,15 +176,18 @@ class Map:
       self.B.send(SEND)
     except Exception as e:
       print(e)
-    b = B.recv()
-    return int(b)
+    b = self.B.recv()
+    i = int.from_bytes(bytearray(b, 'ascii'), byteorder='big', signed=False)
+    return i
 
   def send_move(self, u, d):
     td = int(round(d*self.d))
     try:
       self.B.send(RECV)
-      self.B.send(u)
-      self.B.send(td)
+      p, q = u.to_bytes(4, byteorder='big', signed=True), d.to_bytes(4, byteorder='big', signed=True)
+      print(p, q)
+      self.B.send(p)
+      self.B.send(q)
     except Exception as e:
       print(e)
 
@@ -183,11 +209,14 @@ class Map:
         z = self.sensor()
       self.correction(z)
     if self.simulate:
-      dp = int(round(stats.norm(self.pos+u*d, self.R.s).rvs()))
-      self.pos = min(max(0, dp), self.m-1)
+      if u*d != 0:
+        mu = self.pos+u*d
+        std = abs(u*d*self.R.p)
+        dp = int(round(stats.norm(mu, math.sqrt(std)).rvs()))
+        self.pos = min(max(0, dp), self.m-1)
     else:
       self.send_move(u, d)
-    if pred:
+    if pred and u*d != 0:
       self.prediction(u, d)
 
   def print(self):
@@ -199,13 +228,13 @@ class Map:
     print("  True size of each bin: " + str(self.d))
     print("  Size of precomputed probability matrices:")
     print("    P(Z|X)    (sensor probability distribution): " + str(self.Pz.shape))
-    print("    P(X'|X,u) (action probability distribution): " + str(len(self.Pxxu)) + " x " + str(self.Pxxu[0].shape))
+    # print("    P(X'|X,u) (action probability distribution): " + str(len(self.Pxxu)) + " x " + str(self.Pxxu[0].shape))
     print("  Bot attached? " + str(self.B != None))
     print("Range Properties:")
     print("  Unique commands available: " + str(self.R.C))
     print("  Bounds for number of steps: " + str(self.R.M))
-    print("  Pivot: " + str(self.R.p))
-    print("  Variance for action probability: " + str(self.R.s))
+    print("  Pivot: " + str(self.R.pivot))
+    print("  Variance proportion for action probability: " + str(self.R.p))
 
 # Arguments:
 #  n - Number of entries in map.
@@ -251,9 +280,9 @@ def new_config(b_mu, b_sigma, g_mu, g_sigma, C, starts_with='gap', bin_size=1000
 def read(M):
   read_map = {'h': -1, 'j': 0, 'k': 0, 'l': 1}
   s = ''
+  print("Waiting for input.")
   while True:
     c = getch()
-    print(c)
     if c == '?':
       print("-------------------------")
       print("This controller works very much like vim. Available commands are:")
@@ -297,13 +326,20 @@ def read(M):
       print("Error when parsing command: " + s + c + ". Try again.")
 
 # Draw graph plot.
-def draw_graph(P, M, pos, r, simulate):
+def draw_graph(K, r, simulate):
+  P, M = K.P, K.M
+  if simulate:
+    pos = K.pos
   m = len(M)
   plt.clf()
   plt.axis([0, m, 0, 1])
+  B = plt.bar(np.arange(m), np.ones(m))
+  for i in range(m):
+    B[i].set_color('blue' if (simulate and pos == i) else 'green' if M[i] == 0 else 'orange')
+  plt.draw()
   B = plt.bar(np.arange(m), P)
   for i in range(m):
-    B[i].set_color('blue' if (simulate and pos == i) else 'yellow' if M[i] == 0 else 'red')
+    B[i].set_color('yellow' if M[i] == 0 else 'red')
   plt.draw()
   if not r:
     plt.pause(0.05)
@@ -323,7 +359,7 @@ def start(M, simulate, pos):
   running = False
   print("Ready. Press ? for help message.")
   while True:
-    running = draw_graph(M.P, M.M, M.pos, running, simulate)
+    running = draw_graph(M, running, simulate)
     u, d, c, p, e = read(M)
     if e:
       break
@@ -343,21 +379,30 @@ def init_bot():
   try:
     B = next(USBInterface.find_bricks(debug=False))
     B.connect()
+    print("Bot found.")
   except usb.core.NoBackendError:
+    print("Bot not found.")
     r_exc = True
   assert r_exc == 0, "No NXT found..."
   return B
 
-def run():
-  C, N, d = new_config(15, 1, 10, 1, [5, 10, 15, 10, 20, 10, 30, 10, 15, 10, 20, 10, 5], bin_size=100)
+def run(simulate):
+  # D=[88, 187, 300, 415, 446, 549], w=30
+  D = [51, 31, 72, 62, 111, 30, 54, 30, 69, 30, 85]
+  C, N, d = new_config(70, 9, 43, 9, D, bin_size=int(np.sum(D)/5))
   # Uniform initial belief.
   U = gen_init_pdist(len(C), uniform=True)
   # Gaussian initial belief centered on second box.
   G1 = gen_init_pdist(len(C), mu=20, sigma=math.sqrt(40))
   # Gaussian initial belief centered on fourth box.
-  G2 = gen_init_pdist(len(C), mu=60, sigma=math.sqrt(40))
-  M = Map(C, N, d, G1, 3, Range([-1, 0, 1], [-50, 0, 50], 4))
-  start(M, True, 5)
+  G2 = gen_init_pdist(len(C), mu=47, sigma=math.sqrt(40))
+  M = Map(C, N, d, G2, 3, Range([-1, 0, 1], [-100, 0, 100], 0.25))
+  start(M, simulate, 5)
+
+def parse_args():
+  if '-s' in sys.argv or '--simulate' in sys.argv:
+    return True
+  return False
 
 if __name__ == '__main__':
-  run()
+  run(parse_args())

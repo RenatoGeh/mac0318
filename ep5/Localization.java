@@ -5,6 +5,7 @@ import lejos.robotics.navigation.DifferentialPilot;
 
 public class Localization {
   private static DataInputStream in;
+  private static DataOutputStream out;
   private static USBConnection usb;
 
   private static DifferentialPilot pilot;
@@ -36,11 +37,10 @@ public class Localization {
     sonar = new UltrasonicSensor(SensorPort.S4);
   }
 
-  private static boolean check(byte c) {
+  private static boolean check(byte c) throws Exception {
     switch(c) {
       case QUIT:
         return true;
-      break;
       case RECV:
         receive();
       break;
@@ -51,20 +51,24 @@ public class Localization {
     return false;
   }
 
-  private static void receive() {
+  private static void receive() throws Exception {
     int u = in.readInt();
     int d = in.readInt();
+    System.out.println(u + ", " + d);
     pilot.travel(u*d, false);   
   }
 
-  private static void send() {
-    out.writeInt(sonar.getDistance());
+  private static void send() throws Exception {
+    int d = sonar.getDistance();
+    System.out.println(d);
+    out.writeInt(d);
     out.flush();
   }
 
   public static void main(String[] args) throws Exception {
     connect();
     initBot();
+    System.out.println("Ready");
     while (true) {
       if (in.available() > 0) {
         byte c = in.readByte();
