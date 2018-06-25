@@ -299,13 +299,30 @@ class Map:
     p = np.array([sx, sy])
     g = np.array([tx, ty])
     f = np.inf
-    last = np.copy(p)
-    while linalg.norm(f) > eps:
-      f = self.f_att(p, g, k_att) + self.f_rep(k_rep, rho, p, C)
+    last = p
+    n = linalg.norm(f)
+    d = linalg.norm(p-g)
+    while n > eps or d > 50.0:
+      att, rep = self.f_att(p, g, k_att), self.f_rep(k_rep, rho, p, C)
+      f = att+rep
       p = p+alpha*f
-      if not np.array_equal(last.astype(int), p.astype(int)):
-        P.append((p[1], p[0]))
+      if not np.array_equal(last.astype(int), p.astype(int)) and \
+         (0 <= p[0] <= self.w and 0 <= p[1] <= self.h):
+        print(p, self.orig_pos(p))
+        P.append((p[0], p[1]))
         last = np.copy(p)
+      n = linalg.norm(f)
+      d = linalg.norm(p-g)
+      if n <= 2 and d > 50.0:
+        # Give it a push. Find orthogonal vector and push in this direction.
+        r = np.random.randn(2)
+        r -= r.dot(f)*f / np.linalg.norm(r)**2
+        r /= np.linalg.norm(r)
+        dr, ds = np.linalg.norm(rep-r), np.linalg.norm(rep+r)
+        df = -r if dr < ds else r
+        p = p+20*df+alpha*f
+        n = linalg.norm(f)
+    P.append(g)
     P = list(np.unique(P, axis=0).astype(int))
     return P
 
@@ -358,8 +375,8 @@ class Map:
       cv2.line(I, p1, p2, 125, 1)
     for p in P:
       I[self.orig_pos(p[1], p[0])] = 150
-    I[sx, sy] = 75
-    I[tx, ty] = 200
+    I[sy, sx] = 75
+    I[ty, tx] = 200
     cv2.imwrite(filename, I)
 
   def show_best_choice(self, sx, sy, tx, ty, mfunc, filename):
@@ -374,8 +391,8 @@ class Map:
       cv2.line(I, p1, p2, 125, 1)
     for p in P:
       I[self.orig_pos(p[1], p[0])] = 150
-    I[sx, sy] = 75
-    I[tx, ty] = 200
+    I[sy, sx] = 75
+    I[ty, tx] = 200
     cv2.imwrite(filename, I)
 
   def show_potential_field(self, k_att, k_rep, alpha, rho, eps, sx, sy, tx, ty, filename):
@@ -385,10 +402,12 @@ class Map:
     I = (self.O*255).astype("uint8")
     L = self.linearize(P)
     for l in L:
-      p1 = self.orig_pos(l[1], l[0])
-      p2 = self.orig_pos(l[3], l[2])
+      p1 = self.orig_pos(l[0], l[1])
+      p2 = self.orig_pos(l[2], l[3])
       cv2.line(I, p1, p2, 125, 1)
+    print("Attention: ", I.shape)
     for p in P:
+      print(p)
       I[self.orig_pos(p)] = 150
     I[sx, sy] = 75
     I[tx, ty] = 200
@@ -399,7 +418,8 @@ class Map:
     img = (self.M*255).astype("uint8")
     for l in self.L:
       cv2.line(img, (l[0], l[1]), (l[2], l[3]), 125, 2)
-    cv2.imwrite("contours.png", img)
+    plt.imshow(img)
+    plt.show()
 
   def show_preimages(self):
     print("Drawing matrix...")
@@ -416,49 +436,15 @@ class Map:
 
 def run():
   M = Map("map.pgm", 5, 2, 2)
-  print("Wavefront...")
-  print("Test case 1.")
-  M.show_wavefront(10, 10, M.w_o-10, M.h_o-10, "wavefront_path_1.png")
-  print("Test case 2.")
-  M.show_wavefront(365, 61, 365, 495, "wavefront_path_2.png")
-  print("Test case 3.")
-  M.show_wavefront(61, 365, 495, 365, "wavefront_path_3.png")
-  print("Test case 4.")
-  M.show_wavefront(211, 555, 588, 268, "wavefront_path_4.png")
-  print("Test case 5.")
-  M.show_wavefront(555, 211, 268, 588, "wavefront_path_5.png")
-  print("Best choice using Manhattan distance...")
-  print("Test case 1.")
-  M.show_best_choice(10, 10, M.w_o-10, M.h_o-10, M.Manhattan, "best_choice_manhattan_1.png")
-  print("Test case 2.")
-  M.show_best_choice(365, 61, 365, 495, M.Manhattan, "best_choice_manhattan_2.png")
-  print("Test case 3.")
-  M.show_best_choice(61, 365, 495, 365, M.Manhattan, "best_choice_manhattan_3.png")
-  print("Test case 4.")
-  M.show_best_choice(211, 555, 588, 268, M.Manhattan, "best_choice_manhattan_4.png")
-  print("Test case 5.")
-  M.show_best_choice(555, 211, 268, 588, M.Manhattan, "best_choice_manhattan_5.png")
-  print("Best choice using Euclidean distance...")
-  print("Test case 1.")
-  M.show_best_choice(10, 10, M.w_o-10, M.h_o-10, M.Euclidean, "best_choice_euclidean_1.png")
-  print("Test case 2.")
-  M.show_best_choice(365, 61, 365, 495, M.Euclidean, "best_choice_euclidean_2.png")
-  print("Test case 3.")
-  M.show_best_choice(61, 365, 495, 365, M.Euclidean, "best_choice_euclidean_3.png")
-  print("Test case 4.")
-  M.show_best_choice(211, 555, 588, 268, M.Euclidean, "best_choice_euclidean_4.png")
-  print("Test case 5.")
-  M.show_best_choice(555, 211, 268, 588, M.Euclidean, "best_choice_euclidean_5.png")
+  # print("Wavefront...")
+  # M.show_wavefront(10, 10, M.w_o-10, M.h_o-10, "wavefront_path.png")
+  # print("Best choice using Manhattan distance...")
+  # M.show_best_choice(10, 10, M.w_o-10, M.h_o-10, M.Manhattan, "best_choice_manhattan.png")
+  # print("Best choice using Euclidean distance...")
+  # M.show_best_choice(10, 10, M.w_o-10, M.h_o-10, M.Euclidean, "best_choice_euclidean.png")
   print("Potential field...")
   # M.show_potential_field(0.1, 10000, 0.1, 500, 0.1, 10, 10, 122, 604, "potential_field.png")
-  print("Test case 1.")
-  M.show_potential_field(0.1, 1000, 0.1, 200, 1.0, 365, 61, 365, 495, "potential_field_1.png")
-  print("Test case 2.")
-  M.show_potential_field(0.1, 1000, 0.1, 200, 1.0, 61, 365, 495, 365, "potential_field_2.png")
-  print("Test case 3.")
-  M.show_potential_field(0.1, 1000, 0.1, 200, 1.0, 211, 555, 588, 268, "potential_field_3.png")
-  print("Test case 4.")
-  M.show_potential_field(0.1, 1000, 0.1, 200, 1.0, 555, 211, 268, 588, "potential_field_4.png")
+  M.show_potential_field(0.1, 1000, 0.1, 200, 1.0, 10, 10, M.w_o-10, M.h_o-10, "potential_field.png")
 
 if __name__ == '__main__':
   run()
