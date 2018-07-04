@@ -9,8 +9,12 @@ import scipy.ndimage as ndimage
 import matplotlib.pyplot as plt
 import math
 
+import USBInterface
+import usb
+import sys
+
 class Map:
-  def __init__(self, img_path, d, bx, by):
+  def __init__(self, img_path, d, bx, by, B):
     self.O = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)/255
     self.w_o, self.h_o = self.O.shape
     self.d = d
@@ -19,6 +23,7 @@ class Map:
     self.M = self.discretize(self.I, bx, by)
     self.L = self.find_lines(self.M)
     self.L_o = self.find_lines(self.I)
+    self.B = B
 
   def discretize(self, I, bx, by):
     self.w, self.h = int(self.w_o/bx), int(self.h_o/by)
@@ -294,7 +299,7 @@ class Map:
         f += n*(p-o)
     return f
 
-  def potential(self, k_att, k_rep, alpha, rho, eps, sx, sy, tx, ty):
+  def potential(self, k_att, k_rep, alpha, rho, eps, sx, sy, tx, ty, move_func=None):
     C = []
     P = [(sy, sx)]
     for c in self.L_o:
@@ -303,17 +308,15 @@ class Map:
     g = np.array([ty, tx])
     f = np.inf
     last = np.copy(p)
-    i = 0
     while linalg.norm(f) > eps:
       f = self.f_att(p, g, k_att) + self.f_rep(k_rep, rho, p, C)
-      p = p+alpha*f
+      df = alpha*f
+      p = p+df
       if not np.array_equal(last.astype(int), p.astype(int)):
         P.append(p)
         last = np.copy(p)
-      i += 1
-      if i % 50 == 0:
-        print(p, linalg.norm(f))
-        i = 0
+      if move_func is not None:
+        move_func(int(df), self.B)
     P = list(np.unique(P, axis=0).astype(int))
     return P
 
@@ -430,41 +433,89 @@ class Map:
     plt.title("Dilated")
     plt.show()
 
+def init_bot():
+  r_exc = False
+  try:
+    B = next(USBInterface.find_bricks(debug=False))
+    B.connect()
+    print("Bot found.")
+  except usb.core.NoBackendError:
+    print("Bot not found.")
+    r_exc = True
+  assert r_exc == 0, "No NXT found..."
+  return B
+
+def init_map():
+  return Map("map.pgm", 5, 2, 2)
+
+def move_potential(f, B):
+  try:
+    B.send(f)
+  except Exception as e:
+    print(e)
+
+def start(B, M, p, q, t, P):
+  if t == "potential":
+    M.potential(P[0], P[1], P[2], P[3], P[4], p[0], p[1], q[0], q[1], move_potential)
+  else:
+    if t == "wavefront":
+      L = M.linearize(M.wavefront(p[0], p[1], q[0], q[1]), M.L)
+    else:
+      L = M.linearize(M.best_choice(p[0], p[1], q[0], q[1], P[0]), M.L)
+    try:
+      B.send(len(L))
+      for l in L:
+        B.send(l[0])
+        B.send(l[1])
+        B.send(l[2])
+        B.send(l[3])
+    except Exception as e:
+      print(e)
+
 def run():
+  B = init_bot()
+  M = init_map()
+  P_wave = []
+  P_potential = [0.1, 10000, 0.01, 500, 1.0]
+  P_best = [Map.Euclidean]
+  p, q = (10, 10), (100, 100)
+  start(B, M, p, q, "wavefront", P_wave)
+
+def test():
   M = Map("map.pgm", 5, 2, 2)
-  # print("Wavefront...")
-  # print("Test case 1.")
-  # M.show_wavefront(10, 10, M.w_o-10, M.h_o-10, "wavefront_path_1.png")
-  # print("Test case 2.")
-  # M.show_wavefront(365, 61, 365, 495, "wavefront_path_2.png")
-  # print("Test case 3.")
-  # M.show_wavefront(61, 365, 495, 365, "wavefront_path_3.png")
-  # print("Test case 4.")
-  # M.show_wavefront(211, 555, 588, 268, "wavefront_path_4.png")
-  # print("Test case 5.")
-  # M.show_wavefront(555, 211, 268, 588, "wavefront_path_5.png")
-  # print("Best choice using Manhattan distance...")
-  # print("Test case 1.")
-  # M.show_best_choice(10, 10, M.w_o-10, M.h_o-10, M.Manhattan, "best_choice_manhattan_1.png")
-  # print("Test case 2.")
-  # M.show_best_choice(365, 61, 365, 495, M.Manhattan, "best_choice_manhattan_2.png")
-  # print("Test case 3.")
-  # M.show_best_choice(61, 365, 495, 365, M.Manhattan, "best_choice_manhattan_3.png")
-  # print("Test case 4.")
-  # M.show_best_choice(211, 555, 588, 268, M.Manhattan, "best_choice_manhattan_4.png")
-  # print("Test case 5.")
-  # M.show_best_choice(555, 211, 268, 588, M.Manhattan, "best_choice_manhattan_5.png")
-  # print("Best choice using Euclidean distance...")
-  # print("Test case 1.")
-  # M.show_best_choice(10, 10, M.w_o-10, M.h_o-10, M.Euclidean, "best_choice_euclidean_1.png")
-  # print("Test case 2.")
-  # M.show_best_choice(365, 61, 365, 495, M.Euclidean, "best_choice_euclidean_2.png")
-  # print("Test case 3.")
-  # M.show_best_choice(61, 365, 495, 365, M.Euclidean, "best_choice_euclidean_3.png")
-  # print("Test case 4.")
-  # M.show_best_choice(211, 555, 588, 268, M.Euclidean, "best_choice_euclidean_4.png")
-  # print("Test case 5.")
-  # M.show_best_choice(555, 211, 268, 588, M.Euclidean, "best_choice_euclidean_5.png")
+  print("Wavefront...")
+  print("Test case 1.")
+  M.show_wavefront(10, 10, M.w_o-10, M.h_o-10, "wavefront_path_1.png")
+  print("Test case 2.")
+  M.show_wavefront(365, 61, 365, 495, "wavefront_path_2.png")
+  print("Test case 3.")
+  M.show_wavefront(61, 365, 495, 365, "wavefront_path_3.png")
+  print("Test case 4.")
+  M.show_wavefront(211, 555, 588, 268, "wavefront_path_4.png")
+  print("Test case 5.")
+  M.show_wavefront(555, 211, 268, 588, "wavefront_path_5.png")
+  print("Best choice using Manhattan distance...")
+  print("Test case 1.")
+  M.show_best_choice(10, 10, M.w_o-10, M.h_o-10, M.Manhattan, "best_choice_manhattan_1.png")
+  print("Test case 2.")
+  M.show_best_choice(365, 61, 365, 495, M.Manhattan, "best_choice_manhattan_2.png")
+  print("Test case 3.")
+  M.show_best_choice(61, 365, 495, 365, M.Manhattan, "best_choice_manhattan_3.png")
+  print("Test case 4.")
+  M.show_best_choice(211, 555, 588, 268, M.Manhattan, "best_choice_manhattan_4.png")
+  print("Test case 5.")
+  M.show_best_choice(555, 211, 268, 588, M.Manhattan, "best_choice_manhattan_5.png")
+  print("Best choice using Euclidean distance...")
+  print("Test case 1.")
+  M.show_best_choice(10, 10, M.w_o-10, M.h_o-10, M.Euclidean, "best_choice_euclidean_1.png")
+  print("Test case 2.")
+  M.show_best_choice(365, 61, 365, 495, M.Euclidean, "best_choice_euclidean_2.png")
+  print("Test case 3.")
+  M.show_best_choice(61, 365, 495, 365, M.Euclidean, "best_choice_euclidean_3.png")
+  print("Test case 4.")
+  M.show_best_choice(211, 555, 588, 268, M.Euclidean, "best_choice_euclidean_4.png")
+  print("Test case 5.")
+  M.show_best_choice(555, 211, 268, 588, M.Euclidean, "best_choice_euclidean_5.png")
   print("Potential field...")
   # M.show_potential_field(0.1, 10000, 0.1, 500, 0.1, 10, 10, 122, 604, "potential_field.png")
   print("Test case 1.")
